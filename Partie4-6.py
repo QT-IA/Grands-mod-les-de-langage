@@ -1,20 +1,19 @@
-"""
-Partie 4 - ChefBot prend les Outils en Main
-Tool use avec approche manuelle et smolagents
-"""
 
 from dotenv import load_dotenv
 from groq import Groq
 from langfuse import observe, get_client, propagate_attributes
 import json
 from typing import List, Dict, Any, Callable
-from smolagents import CodeAgent, LiteLLMModel, tool
+from smolagents import CodeAgent, LiteLLMModel, tool, Tool
+from Partie5 import MenuDatabaseTool, calculate
 
 load_dotenv()
 
 groq_client = Groq()
 langfuse_client = get_client()
 modele = "openai/gpt-oss-120b"
+
+# PARTIE 4 - TOOL CALLING MANUEL VS SMOLAGENTS
 
 # 4.1 - Définitions des 3 outils
 
@@ -508,12 +507,178 @@ def compare_approaches():
         # Au final, smolagents est plus pratique et rapide à faire et la méthode manuelle est plutot
         # pour les projets tordus qui demandent un contrôle total sur chaque étape.
 
+
+
+# PARTIE 6 - L'EMPIRE CHEFBOT
+
+# Outils importés depuis Partie5.py (Partie 5): MenuDatabaseTool et calculate
+
+# 6.1 - Construction du système multi-agent
+def build_chefbot_empire():
+    """
+    Construit le système multi-agent ChefBot avec un manager et 3 agents spécialisés.
+    
+    Returns:
+        Le manager agent qui coordonne les agents spécialisés
+    """
+    
+    # Créer le modèle LLM
+    model = LiteLLMModel(model_id=f"groq/{modele}", temperature=0.3)
+    
+    # --- Agent 1: Nutritionist ---
+    # Vérifie l'équilibre nutritionnel et les allergènes
+    nutritionist = CodeAgent(
+        tools=[check_dietary_info_tool],
+        model=model,
+        name="nutritionist",
+        description=(
+            "Nutritionniste expert qui vérifie l'équilibre nutritionnel et les allergènes. "
+            "Utilise check_dietary_info_tool pour analyser les ingrédients. "
+            "Peut recommander des alternatives pour les allergies et intolérances."
+        ),
+        max_steps=5,
+    )
+    
+    # --- Agent 2: Chef Agent ---
+    # Propose des recettes et consulte le frigo
+    chef_agent = CodeAgent(
+        tools=[check_fridge_tool, get_recipe_tool],
+        model=model,
+        name="chef_agent",
+        description=(
+            "Chef cuisinier expert qui propose des recettes et consulte le frigo. "
+            "Utilise check_fridge_tool pour voir les ingrédients disponibles et "
+            "get_recipe_tool pour obtenir des recettes détaillées."
+        ),
+        max_steps=5,
+    )
+    
+    # --- Agent 3: Budget Agent ---
+    # Calcule les coûts et respecte le budget
+    menu_db = MenuDatabaseTool()
+    budget_agent = CodeAgent(
+        tools=[calculate, menu_db],
+        model=model,
+        name="budget_agent",
+        description=(
+            "Expert en gestion de budget qui calcule les coûts et consulte le menu. "
+            "Utilise menu_database pour trouver des plats selon le budget et "
+            "calculate pour effectuer les calculs de coûts totaux."
+        ),
+        max_steps=5,
+    )
+    
+    # --- Manager ---
+    # Coordonne les 3 agents spécialisés, n'a aucun outil propre
+    manager = CodeAgent(
+        tools=[],  # Pas d'outils propres
+        model=model,
+        managed_agents=[nutritionist, chef_agent, budget_agent],
+        name="chefbot_manager",
+        description=(
+            "Tu es le manager de ChefBot, un système de restauration intelligent. "
+            "Tu coordonnes 3 agents spécialisés:\n"
+            "- nutritionist: pour vérifier l'équilibre nutritionnel et les allergènes\n"
+            "- chef_agent: pour proposer des recettes et consulter le frigo\n"
+            "- budget_agent: pour gérer le budget et trouver des plats dans le menu\n\n"
+            "Délègue intelligemment les tâches aux agents appropriés. "
+            "Pour une demande complexe, consulte plusieurs agents et synthétise leurs réponses."
+        ),
+        max_steps=10,
+    )
+    
+    return manager
+
+
+# 6.2 - Test du système multi-agent
+@observe(name="Quentin & Arthur - Partie 6")
+def test_empire_chefbot():
+    try:
+        with propagate_attributes(tags=["Quentin & Arthur", "Partie 6"]):
+            langfuse_client.update_current_trace(
+                metadata={
+                    "type": "multi_agent_system",
+                    "partie": "Partie 6",
+                    "agents": ["nutritionist", "chef_agent", "budget_agent"],
+                    "manager": "chefbot_manager"
+                }
+            )
+    except Exception:
+        pass
+    
+    manager = build_chefbot_empire()
+
+    complex_query = (
+        "Je reçois 8 personnes samedi soir. Parmi eux : 2 végétariens, "
+        "1 intolérant au gluten, 1 allergique aux fruits à coque. "
+        "Budget total : 120 euros. "
+        "Je veux un apéritif, une entrée, un plat principal et un dessert. "
+        "Il faut que tout le monde puisse manger chaque service."
+    )
+    
+    print("Requête complexe :\n")
+    print(f"\n{complex_query}\n")
+    
+    try:
+        result = manager.run(complex_query)
+        
+        print("Résultat :")
+        print(f"\n{result}\n")
+        
+        # Mise à jour de la trace avec succès
+        try:
+            langfuse_client.update_current_trace(
+                metadata={
+                    "type": "multi_agent_system",
+                    "partie": "Partie 6",
+                    "agents": ["nutritionist", "chef_agent", "budget_agent"],
+                    "manager": "chefbot_manager",
+                    "status": "completed",
+                    "query_complexity": "high",
+                    "constraints": ["végétariens", "sans gluten", "sans fruits à coque", "budget 120€"]
+                }
+            )
+        except Exception:
+            pass
+        
+        return result
+        
+    except Exception as e:
+        error_msg = f"Erreur lors de l'exécution: {str(e)}"
+        print(f"\n{error_msg}\n")
+        
+        # Mise à jour de la trace en cas d'erreur
+        try:
+            langfuse_client.update_current_trace(
+                metadata={
+                    "type": "multi_agent_system",
+                    "partie": "Partie 6",
+                    "status": "error",
+                    "error": str(e)
+                }
+            )
+        except Exception:
+            pass
+        
+        return error_msg
+
+
 if __name__ == "__main__":
-    # Exécuter la comparaison
+    print("PARTIE 4 ")
+    
+    # Exécuter la comparaison de la partie 4
     compare_approaches()
+    
+    print("PARTIE 6 - L'EMPIRE CHEFBOT")
+    
+    # Exécuter le test du système multi-agent
+    test_empire_chefbot()
     
     # Flush final pour s'assurer que toutes les traces sont envoyées
     try:
         langfuse_client.flush()
+        print("\nTraces Langfuse envoyées")
     except Exception as e:
-        print(f"Erreur lors du flush final: {str(e)}")
+        print(f"\nErreur lors du flush Langfuse: {e}")
+    
+    print("PARTIES 4 ET 6 TERMINÉES")
